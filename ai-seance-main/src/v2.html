@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Seance</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Crimson+Text:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body,
+        html {
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Crimson Text', serif;
+        }
+
+        .image-text {
+            position: absolute;
+            font-size: 16px;
+            font-weight: bold;
+            text-align: center;
+            width: 90%;
+            max-width: 600px;
+            padding: 5px;
+            background-color: rgba(255, 255, 255, 0.7);
+            z-index: 20;
+            /* Ensure inputs are above the animation */
+        }
+
+        .top {
+            top: 10px;
+            left: 50%;
+            transform: translate(-50%, 0) rotate(180deg);
+        }
+
+        .bottom {
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .left {
+            top: 15%;
+            left: 30px;
+            transform: translate(0, -50%) rotate(90deg);
+            transform-origin: left center;
+        }
+
+        .right {
+            top: 15%;
+            right: 30px;
+            transform: translate(0, -50%) rotate(-90deg);
+            transform-origin: right center;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        #mainImage {
+            transition: opacity 0.5s ease-in-out;
+        }
+
+        #mainImage.pulsing {
+            animation: pulse 2s infinite;
+        }
+
+        #fadeOverlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: black;
+            opacity: 0;
+            transition: opacity 1s ease-in-out;
+            pointer-events: none;
+        }
+
+        #fadeOverlay.fade-in {
+            opacity: 1;
+        }
+
+        #conceptAnimation {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 90%;
+            height: 90%;
+            z-index: 10;
+            display: none;
+        }
+    </style>
+</head>
+
+<body class="bg-black flex flex-col font-['Crimson_Text']">
+    <div id="secretModal" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
+        <div class="bg-gray-800 p-8 rounded-lg shadow-lg">
+            <h2 class="text-2xl mb-4 font-bold text-white">What Spirits Do You Seek?</h2>
+            <input id="secretInput" type="password" placeholder="Whisper your secret"
+                class="w-full mb-4 p-2 border border-gray-600 rounded bg-gray-700 text-white">
+            <input id="eventNameInput" type="text" placeholder="Name your spectral assembly"
+                class="w-full mb-4 p-2 border border-gray-600 rounded bg-gray-700 text-white">
+            <button id="submitSecret"
+                class="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700">Unveil</button>
+        </div>
+    </div>
+
+    <div id="imageContainer" class="flex-grow flex items-center justify-center p-0 hidden">
+        <div class="relative max-w-full max-h-full">
+            <img id="mainImage" src="https://seance-assets.anotherjesse.com/black-1024.png" alt="Main Image"
+                class="max-w-full max-h-[90vh] object-contain">
+            <div id="fadeOverlay"></div>
+            <div id="errorMessage"
+                class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-70 text-white text-xl font-bold hidden">
+            </div>
+            <input id="topText" class="image-text top" placeholder="~">
+            <input id="bottomText" class="image-text bottom" placeholder="Enter concept or ! to start prompting">
+            <input id="leftText" class="image-text left" placeholder="~">
+            <input id="rightText" class="image-text right" placeholder="~">
+
+            <svg id="conceptAnimation" class="absolute inset-0 w-full h-full hidden" viewBox="-50 -50 100 100">
+                <path id="orbitPath" d="M0,0 m-40,0 a40,40 0 1,0 80,0 a40,40 0 1,0 -80,0" fill="none" stroke="none" />
+            </svg>
+        </div>
+    </div>
+
+    <script>
+        const shimmer = new Audio('https://seance-assets.anotherjesse.com/shimmer.mp3')
+        const conjuring = new Audio('https://seance-assets.anotherjesse.com/conjuring.mp3');
+        const mainImage = document.getElementById('mainImage');
+        const bottomText = document.getElementById('bottomText');
+        const textInputs = ['topText', 'bottomText', 'leftText', 'rightText'].map(id => document.getElementById(id));
+
+        const secretModal = document.getElementById('secretModal');
+        const imageContainer = document.getElementById('imageContainer');
+        const submitSecretButton = document.getElementById('submitSecret');
+        const secretInput = document.getElementById('secretInput');
+        const eventNameInput = document.getElementById('eventNameInput');
+
+        let secret = '';
+        let eventName = '';
+
+        const errorMessage = document.getElementById('errorMessage');
+        const fadeOverlay = document.getElementById('fadeOverlay');
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.classList.remove('hidden');
+        }
+
+        function clearError() {
+            errorMessage.textContent = '';
+            errorMessage.classList.add('hidden');
+        }
+
+        let concepts = [];
+        let conceptElements = [];
+        let animationStarted = false;
+        let isConceptMode = true;
+        let theme = '';
+        let lastImage;
+        let history = [];
+
+        function addConcept(concept) {
+            concepts.push(concept);
+            localStorage.setItem('concepts', JSON.stringify(concepts));
+            const element = createConceptElement(concept);
+            animateConcept(element, concepts.length - 1);
+            startConceptAnimation();
+        }
+
+        function createConceptElement(concept) {
+            const svgNS = "http://www.w3.org/2000/svg";
+
+            const text = document.createElementNS(svgNS, "text");
+            text.textContent = concept;
+            text.setAttribute("fill", "white");
+            text.setAttribute("font-size", "4");
+            text.setAttribute("text-anchor", "middle");
+
+            const textPath = document.createElementNS(svgNS, "textPath");
+            textPath.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", "#orbitPath");
+
+            const startOffset = Math.random() * 100;
+            textPath.setAttribute("startOffset", `${startOffset}%`);
+
+            text.appendChild(textPath);
+            document.getElementById('conceptAnimation').appendChild(text);
+
+            conceptElements.push(text);
+            return text;
+        }
+
+        function loadConcepts() {
+            const savedConcepts = localStorage.getItem('concepts');
+            if (savedConcepts) {
+                concepts = JSON.parse(savedConcepts);
+                console.log('Loaded concepts:', concepts);
+                concepts.forEach((concept, index) => {
+                    const element = createConceptElement(concept);
+                    animateConcept(element, index);
+                });
+            }
+        }
+
+        function startConceptAnimation() {
+            if (!animationStarted && concepts.length > 0) {
+                document.getElementById('conceptAnimation').style.display = 'block';
+                animationStarted = true;
+            }
+        }
+
+        function animateConcept(element, index) {
+            const duration = 15000 + Math.floor(Math.random() * 5000);
+            const delay = index * (duration / concepts.length);
+
+            const initialX = (Math.random() - 0.5) * 60;
+            const initialY = (Math.random() - 0.5) * 40;
+            const initialRotation = Math.random() * 360;
+            const initialScale = 0.5 + Math.random() * 0.5;
+
+            element.setAttribute('transform', `translate(${initialX}, ${initialY}) scale(${initialScale}) rotate(${initialRotation})`);
+
+            const animate = () => {
+                const t = (Date.now() + delay) % duration / duration;
+                const angle = t * Math.PI * 4;
+                const distanceX = Math.sin(angle) * 30;
+                const distanceY = Math.sin(angle * 2) * 20;
+                const scale = 0.5 + (1 - Math.abs(Math.sin(t * Math.PI * 2))) * 0.5;
+                const x = distanceX * Math.cos(t * Math.PI * 2);
+                const y = distanceY;
+                const rotation = t * 360;
+
+                element.setAttribute('transform', `translate(${x}, ${y}) scale(${scale}) rotate(${rotation})`);
+                requestAnimationFrame(animate);
+            };
+
+            animate();
+        }
+
+        function switchToPromptMode() {
+            isConceptMode = false;
+            bottomText.placeholder = "Enter prompt here";
+            textInputs.forEach(input => input.value = '');
+        }
+
+        submitSecretButton.addEventListener('click', () => {
+            secret = secretInput.value.trim();
+            eventName = eventNameInput.value.trim();
+            if (secret && eventName) {
+                secretModal.classList.add('hidden');
+                imageContainer.classList.remove('hidden');
+                loadConcepts();
+                startConceptAnimation();
+                bottomText.placeholder = "Enter concept or ! to start prompting";
+            } else {
+                alert('Please enter both your secret and the event name.');
+            }
+        });
+
+        async function updateImage(prompt) {
+            if (animationStarted) {
+                document.getElementById('conceptAnimation').style.display = 'none';
+                animationStarted = false;
+            }
+
+            clearError();
+            if (!prompt) {
+                prompt = bottomText.value.trim();
+            }
+            let seed = Math.floor(Math.random() * 1000000000);
+
+            if (prompt.includes('|')) {
+                const parts = prompt.split('|');
+                seed = parseInt(parts[1].trim());
+                prompt = parts[0].trim();
+
+                if (isNaN(seed)) {
+                    seed = Math.floor(Math.random() * 1000000000);
+                }
+            }
+
+            if (!prompt) {
+                return;
+            }
+
+            try {
+
+                // Play the shimmer
+                // Start pulsing effect on fadeOverlay
+                shimmer.play();
+                conjuring.pause();
+                conjuring.currentTime = 0;
+                fadeOverlay.classList.add('fade-in');
+
+                let { prompt: result, offering } = await promptify(prompt);
+
+                // Show spiral animation for the prompt
+                // const conceptAnimation = document.getElementById('conceptAnimation');
+                // conceptAnimation.style.display = 'block';
+                spiralText(result)
+
+                let model = localStorage.getItem('model') || 'fal-ai/fast-sdxl';
+
+                // After spiral animation, proceed with image generation
+                const response = await fetch('/api/generate-image', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ prompt: result, seed, secret, model, event: eventName, meta: { question: prompt, offering } }),
+                });
+
+                if (response.status === 401) {
+                    throw new Error('Invalid secret');
+                }
+
+                if (!response.ok) {
+                    throw new Error('API request failed');
+                }
+
+                const data = await response.json();
+
+                // Set the new image source and handle the fade effect
+                const newImage = new Image();
+                newImage.onload = () => {
+                    mainImage.src = newImage.src;
+                    shimmer.pause();
+                    shimmer.currentTime = 0;
+
+                    fadeOverlay.classList.remove('pulsing');
+                    setTimeout(() => {
+                        fadeOverlay.classList.remove('fade-in');
+                        conjuring.play();
+                    }, 50);
+                };
+                newImage.src = data.imageUrl;
+                lastImage = data.imageUrl;
+            } catch (error) {
+                console.error('Error updating image:', error);
+
+                fadeOverlay.classList.remove('fade-in', 'pulsing');
+                shimmer.pause();
+                shimmer.currentTime = 0;
+
+                if (error.message === 'Invalid secret') {
+                    showError('The spirits reject your offering. Cleanse your mind and begin anew.');
+                } else {
+                    showError('The ethereal connection is disturbed. Pause and try again.');
+                }
+            }
+        }
+
+        textInputs.forEach(input => {
+            input.addEventListener('input', () => {
+                clearError();
+                textInputs.forEach(el => {
+                    if (el !== input) {
+                        el.value = input.value;
+                    }
+                });
+            });
+        });
+
+        bottomText.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                const input = bottomText.value.trim();
+                if (isConceptMode) {
+                    if (input === '!') {
+                        startPromptMode();
+                    } else if (input) {
+                        addConcept(input);
+                        bottomText.value = '';
+                    }
+                } else {
+                    updateImage();
+                }
+            }
+            if (event.key === 'Escape') {
+                clearError();
+                textInputs.forEach(el => {
+                    el.value = '';
+                });
+            }
+        });
+
+        window.addEventListener('resize', () => {
+            const size = Math.min(window.innerWidth, window.innerHeight);
+            mainImage.style.width = size + 'px';
+            mainImage.style.height = size + 'px';
+        });
+
+        function startPromptMode() {
+            isConceptMode = false;
+            bottomText.placeholder = "Enter prompt here";
+            textInputs.forEach(input => input.value = '');
+
+            generateTheme();
+        }
+        function generateTheme() {
+            const savedGenerator = localStorage.getItem('generator');
+
+            // Speed up the animation
+            speedUpAnimation();
+
+
+            let filtered = concepts.filter(concept =>
+                !concept.endsWith('..') &&
+                !concept.endsWith('  ')
+            );
+
+            fetch("/api/llm", {
+                method: "POST",
+                body: JSON.stringify({
+                    secret: secret,
+                    system: savedGenerator,
+                    messages: [filtered.join("\n").trim()],
+                    prefill: "Theme:"
+                })
+            }).then(async response => {
+                if (!response.ok) {
+                    let error = await response.text();
+                    statusMessage.textContent = error;
+                    throw new Error('Network response was not ok');
+                }
+                return response.json();
+            })
+                .then(data => {
+                    theme = data.content;
+                    theme = theme.replace('Theme:', '').trim();
+                    console.log(theme);
+                    localStorage.setItem('theme', theme);
+                    showTheme();
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+        }
+
+        function speedUpAnimation() {
+            conceptElements.forEach((element, index) => {
+                element.textContent = '*';
+            });
+        }
+
+        function showTheme() {
+            // Remove concept animation
+            const conceptAnimation = document.getElementById('conceptAnimation');
+            conceptAnimation.innerHTML = '';
+            conceptAnimation.style.display = 'none';
+
+            // spiralText(theme);
+
+            updateImage(theme);
+        }
+
+        function spiralText(text) {
+            // Split the text into words
+            const words = text.split(/\s+/);
+            let offset = Math.floor(Math.random() * 100);
+
+            // Animate each word
+            words.forEach((word, index) => {
+                setTimeout(() => {
+                    animateWord(word, offset + index, words.length);
+                }, index * 150);
+            });
+        }
+
+        function animateWord(word, index, totalWords) {
+            const animatedWord = document.createElement('div');
+            animatedWord.textContent = word;
+            animatedWord.style.position = 'absolute';
+            animatedWord.style.fontSize = '24px';
+            animatedWord.style.color = 'white';
+            animatedWord.style.transition = 'all 2s ease-in-out';
+            animatedWord.style.opacity = '1';
+
+            const angle = ((index * 15) % 360) * Math.PI / 180;
+
+            const topInput = document.getElementById('topText');
+            const bottomInput = document.getElementById('bottomText');
+            const leftInput = document.getElementById('leftText');
+            const rightInput = document.getElementById('rightText');
+
+            const boxWidth = rightInput.getBoundingClientRect().right - leftInput.getBoundingClientRect().left;
+            const boxHeight = bottomInput.getBoundingClientRect().bottom - topInput.getBoundingClientRect().top;
+            const radius = Math.min(boxWidth, boxHeight) / 2 - 50;
+
+            const centerX = (leftInput.getBoundingClientRect().left + rightInput.getBoundingClientRect().right) / 2;
+            const centerY = (topInput.getBoundingClientRect().top + bottomInput.getBoundingClientRect().bottom) / 2;
+
+            const x = centerX + radius * Math.cos(angle);
+            const y = centerY + radius * Math.sin(angle);
+
+            animatedWord.style.left = `${x}px`;
+            animatedWord.style.top = `${y}px`;
+            animatedWord.style.transform = `translate(-50%, -50%) rotate(${angle + Math.PI / 2}rad)`;
+
+            document.body.appendChild(animatedWord);
+
+            setTimeout(() => {
+                animatedWord.style.left = `${centerX}px`;
+                animatedWord.style.top = `${centerY}px`;
+                animatedWord.style.fontSize = '12px';
+                animatedWord.style.transform = 'translate(-50%, -50%) rotate(0deg)';
+
+                setTimeout(() => {
+                    animatedWord.style.opacity = '0';
+                    setTimeout(() => {
+                        document.body.removeChild(animatedWord);
+                    }, 1000);
+                }, 1000);
+            }, 100);
+        }
+
+        async function promptify(prompt) {
+
+            let filtered = concepts.filter(concept =>
+                !concept.endsWith('..') &&
+                !concept.endsWith('. ') &&
+                !concept.endsWith('  ')
+            );
+
+            let offering = filtered[Math.floor(Math.random() * filtered.length)];
+            let suffix = localStorage.getItem('suffix') || '';
+            if (suffix) {
+                prompt = prompt + ' ' + suffix.replace('$THEME', theme).replace('$OFFERING', offering);
+            }
+
+            console.log({ offering, prompt })
+            history.push(prompt);
+            return { prompt, offering }
+        }
+
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Replicate Text to Image</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Crimson+Text:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0f1117;
+        --text: #e8ebf3;
+        --muted: #b8c0d0;
+        --border: rgba(255, 255, 255, 0.14);
+        --input-bg: rgba(20, 24, 36, 0.85);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        min-height: 100dvh;
+        overflow: hidden;
+      }
+
+      body {
+        font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      #bg {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        background-color: var(--bg);
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+      }
+
+      .overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 1;
+        background: linear-gradient(
+          to top,
+          rgba(0, 0, 0, 0.8) 0%,
+          rgba(0, 0, 0, 0.25) 30%,
+          transparent 55%
+        );
+        pointer-events: none;
+      }
+
+      #fadeOverlay {
+        position: fixed;
+        inset: 0;
+        z-index: 2;
+        background-color: black;
+        opacity: 0;
+        transition: opacity 1s ease-in-out;
+        pointer-events: none;
+      }
+
+      #fadeOverlay.fade-in {
+        opacity: 1;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+
+      #fadeOverlay.pulsing {
+        animation: pulse 2s infinite;
+      }
+
+      .spiral-word {
+        position: fixed;
+        z-index: 3;
+        font-family: "Crimson Text", Georgia, serif;
+        font-size: 24px;
+        font-weight: 700;
+        color: white;
+        text-shadow: 0 0 12px rgba(0, 0, 0, 0.9);
+        transition: all 2s ease-in-out;
+        opacity: 1;
+        pointer-events: none;
+      }
+
+      .prompt-bar {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 4;
+        padding: 10px 14px max(16px, env(safe-area-inset-bottom));
+      }
+
+      .prompt-inner {
+        max-width: 480px;
+        margin: 0 auto;
+      }
+
+      #prompt {
+        width: 100%;
+        display: block;
+        resize: none;
+        overflow: hidden;
+        min-height: 38px;
+        max-height: 40vh;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px 14px;
+        background: var(--input-bg);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        color: var(--text);
+        font: inherit;
+        font-size: 0.9rem;
+        line-height: 1.4;
+        outline: none;
+      }
+
+      #prompt::placeholder {
+        color: var(--muted);
+      }
+
+      #prompt:focus {
+        border-color: rgba(106, 160, 255, 0.55);
+      }
+
+      .status {
+        margin-top: 6px;
+        min-height: 1.1em;
+        font-size: 0.8rem;
+        color: var(--muted);
+        text-align: center;
+        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+      }
+
+      .status.error {
+        color: #ff9a9a;
+      }
+
+      body.loading #prompt {
+        opacity: 0.65;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="bg" aria-hidden="true"></div>
+    <div class="overlay" aria-hidden="true"></div>
+    <div id="fadeOverlay" aria-hidden="true"></div>
+
+    <footer class="prompt-bar">
+      <div class="prompt-inner">
+        <textarea
+          id="prompt"
+          rows="1"
+          placeholder="Describe an image…"
+          autocomplete="off"
+        ></textarea>
+        <div id="status" class="status"></div>
+      </div>
+    </footer>
+
+    <script>
+      const SHIMMER_URL = "https://seance-assets.anotherjesse.com/shimmer.mp3";
+      const CONJURING_URL =
+        "https://seance-assets.anotherjesse.com/conjuring.mp3";
+
+      const shimmer = new Audio(SHIMMER_URL);
+      const conjuring = new Audio(CONJURING_URL);
+
+      const bgEl = document.getElementById("bg");
+      const fadeOverlay = document.getElementById("fadeOverlay");
+      const promptInput = document.getElementById("prompt");
+      const statusEl = document.getElementById("status");
+
+      function setStatus(message, isError = false) {
+        statusEl.textContent = message;
+        statusEl.className = isError ? "status error" : "status";
+      }
+
+      function resizePrompt() {
+        promptInput.style.height = "auto";
+        const max = window.innerHeight * 0.4;
+        promptInput.style.height =
+          Math.min(promptInput.scrollHeight, max) + "px";
+      }
+
+      function setBackground(url) {
+        bgEl.style.backgroundImage = url
+          ? `url(${JSON.stringify(url)})`
+          : "";
+      }
+
+      function preloadBackground(url) {
+        return new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => {
+            setBackground(url);
+            resolve();
+          };
+          img.onerror = () => reject(new Error("Failed to load image."));
+          img.src = url;
+        });
+      }
+
+      function beginConjuring() {
+        conjuring.pause();
+        conjuring.currentTime = 0;
+        fadeOverlay.classList.add("fade-in", "pulsing");
+        shimmer.play().catch(() => {});
+      }
+
+      function endConjuring() {
+        shimmer.pause();
+        shimmer.currentTime = 0;
+        fadeOverlay.classList.remove("pulsing");
+        setTimeout(() => {
+          fadeOverlay.classList.remove("fade-in");
+          conjuring.play().catch(() => {});
+        }, 50);
+      }
+
+      function cancelConjuring() {
+        fadeOverlay.classList.remove("fade-in", "pulsing");
+        shimmer.pause();
+        shimmer.currentTime = 0;
+        conjuring.pause();
+        conjuring.currentTime = 0;
+      }
+
+      function spiralCenter() {
+        const centerX = window.innerWidth / 2;
+        const centerY = window.innerHeight / 2;
+        const radius = Math.min(window.innerWidth, window.innerHeight) / 2 - 50;
+        return { centerX, centerY, radius };
+      }
+
+      function spiralText(text) {
+        const words = text.split(/\s+/).filter(Boolean);
+        words.forEach((word, index) => {
+          setTimeout(() => animateWord(word, index), index * 150);
+        });
+      }
+
+      function animateWord(word, index) {
+        const { centerX, centerY, radius } = spiralCenter();
+        const angle = ((index * 15) % 360) * (Math.PI / 180);
+
+        const el = document.createElement("div");
+        el.className = "spiral-word";
+        el.textContent = word;
+
+        const x = centerX + radius * Math.cos(angle);
+        const y = centerY + radius * Math.sin(angle);
+
+        el.style.left = `${x}px`;
+        el.style.top = `${y}px`;
+        el.style.transform = `translate(-50%, -50%) rotate(${angle + Math.PI / 2}rad)`;
+
+        document.body.appendChild(el);
+
+        setTimeout(() => {
+          el.style.left = `${centerX}px`;
+          el.style.top = `${centerY}px`;
+          el.style.fontSize = "12px";
+          el.style.transform = "translate(-50%, -50%) rotate(0deg)";
+
+          setTimeout(() => {
+            el.style.opacity = "0";
+            setTimeout(() => el.remove(), 1000);
+          }, 1000);
+        }, 100);
+      }
+
+      async function generateImage() {
+        const prompt = promptInput.value.trim();
+
+        if (!prompt) {
+          setStatus("Enter a prompt first.", true);
+          return;
+        }
+
+        document.body.classList.add("loading");
+        setStatus("");
+
+        beginConjuring();
+        spiralText(prompt);
+
+        try {
+          const res = await fetch("/api/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ prompt })
+          });
+
+          const data = await res.json();
+          if (!res.ok) {
+            throw new Error(data.error || "Generation failed.");
+          }
+
+          await preloadBackground(data.imageUrl);
+          endConjuring();
+          setStatus("");
+        } catch (error) {
+          cancelConjuring();
+          const msg =
+            error.message === "Failed to fetch"
+              ? "Could not reach the server. Run: flask --app server run"
+              : error.message || "Unexpected error.";
+          setStatus(msg, true);
+        } finally {
+          document.body.classList.remove("loading");
+          promptInput.focus();
+        }
+      }
+
+      promptInput.addEventListener("input", resizePrompt);
+      window.addEventListener("resize", resizePrompt);
+
+      promptInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          generateImage();
+        }
+      });
+
+      resizePrompt();
+      promptInput.focus();
+    </script>
+  </body>
+</html>
